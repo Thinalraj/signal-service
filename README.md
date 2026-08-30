@@ -8,6 +8,10 @@ The amplitude control defaults to 1 V peak and is limited to 5 V peak.
 Stop the sine wave before selecting another frequency. Set both probes
 physically to 1x; probe attenuation is not changed by this program.
 
+Use **Sample measurement** to acquire N readings at a selected interval. The
+statistics table reports mean, minimum, maximum, standard deviation, and mean
+± standard deviation for each measured quantity.
+
 ## Run simulation
 
 ```bash

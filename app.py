@@ -178,12 +178,27 @@ class App:
         self.stop.grid(row=0, column=1, padx=4)
         self.acquire_button = ttk.Button(controls, text="Acquire measurement", command=self.start_measurement)
         self.acquire_button.grid(row=0, column=2, padx=4)
+        self.sample_button = ttk.Button(controls, text="Sample measurement", command=self.start_sampling)
+        self.sample_button.grid(row=0, column=3, padx=4)
+        sample_controls = ttk.Frame(root)
+        sample_controls.pack(padx=16, pady=(8, 0))
+        ttk.Label(sample_controls, text="N samples:").grid(row=0, column=0, padx=4)
+        self.sample_count = tk.IntVar(value=10)
+        ttk.Spinbox(sample_controls, from_=1, to=1000, width=7, textvariable=self.sample_count).grid(row=0, column=1)
+        ttk.Label(sample_controls, text="Interval (s):").grid(row=0, column=2, padx=(12, 4))
+        self.sample_interval = tk.DoubleVar(value=0.5)
+        ttk.Spinbox(sample_controls, from_=0.0, to=3600.0, increment=0.1, width=7,
+                    textvariable=self.sample_interval).grid(row=0, column=3)
         self.status = ttk.Label(root, text="Ready")
         self.status.pack(padx=16)
         self.table = ttk.Treeview(root, columns=("set", "rms", "peak", "p2p", "freq"), show="headings")
         for col, title in zip(self.table["columns"], ("Set Hz", "AC RMS V", "Peak V", "Vpp", "Measured Hz")):
             self.table.heading(col, text=title)
         self.table.pack(padx=16, pady=12)
+        self.stats_table = ttk.Treeview(root, columns=("metric", "mean", "min", "max", "std", "range"), show="headings")
+        for col, title in zip(self.stats_table["columns"], ("Metric", "Mean", "Min", "Max", "Std dev", "Mean ± std")):
+            self.stats_table.heading(col, text=title)
+        self.stats_table.pack(padx=16, pady=(0, 12))
         self.instrument = None
         self.instrument_lock = threading.Lock()
         self.sine_running = False
@@ -251,6 +266,50 @@ class App:
     def start_measurement(self) -> None:
         self.start.config(state="disabled")
         threading.Thread(target=self.run, daemon=True).start()
+
+    def start_sampling(self) -> None:
+        self.sample_button.config(state="disabled")
+        threading.Thread(target=self.run_sampling, daemon=True).start()
+
+    def run_sampling(self) -> None:
+        try:
+            count = int(self.sample_count.get())
+            interval = float(self.sample_interval.get())
+            if count < 1 or interval < 0:
+                raise ValueError("N must be at least 1 and interval cannot be negative")
+            instrument = self.get_instrument()
+            if not self.sine_running:
+                amplitude = self.selected_amplitude()
+                with self.instrument_lock:
+                    instrument.start_sine(self.selected_frequency, amplitude)
+                self.sine_running = True
+            results = []
+            for index in range(count):
+                with self.instrument_lock:
+                    samples, rate = instrument.acquire(0.01, self.selected_frequency * 10)
+                results.append(measure(samples, rate))
+                self.root.after(0, self.status.config, {"text": f"Sample {index + 1}/{count}"})
+                if index + 1 < count:
+                    time.sleep(interval)
+            self.root.after(0, self.show_statistics, results)
+            self.root.after(0, self.status.config, {"text": "Sampling complete"})
+        except Exception as exc:
+            self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
+        finally:
+            self.root.after(0, lambda: self.sample_button.config(state="normal"))
+
+    def show_statistics(self, results: list[dict[str, float]]) -> None:
+        for item in self.stats_table.get_children():
+            self.stats_table.delete(item)
+        metrics = (("AC RMS (V)", "ac_rms_v"), ("Peak amplitude (V)", "peak_amplitude_v"),
+                   ("Peak-to-peak (V)", "peak_to_peak_v"), ("Frequency (Hz)", "frequency_hz"))
+        for label, key in metrics:
+            values = [row[key] for row in results]
+            mean = sum(values) / len(values)
+            variance = sum((value - mean) ** 2 for value in values) / len(values)
+            std = math.sqrt(variance)
+            self.stats_table.insert("", "end", values=(label, f"{mean:.6g}", f"{min(values):.6g}",
+                f"{max(values):.6g}", f"{std:.6g}", f"{mean:.6g} ± {std:.6g}"))
 
     def run(self) -> None:
         instrument = self.get_instrument()
