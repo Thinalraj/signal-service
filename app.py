@@ -14,6 +14,30 @@ import tkinter as tk
 from tkinter import ttk
 
 
+def configure_waveforms_sdk() -> None:
+    """Make the WaveForms SDK package and native library importable."""
+    import os
+    import sys
+
+    sdk_root = os.environ.get("WAVEFORMS_SDK_ROOT")
+    if not sdk_root and os.name == "nt":
+        sdk_root = r"C:\Program Files\Digilent\WaveFormsSDK"
+    if not sdk_root:
+        return
+
+    sdk_python = os.path.join(sdk_root, "samples", "py")
+    sdk_lib = os.path.join(sdk_root, "lib", "x64")
+    if not os.path.isdir(sdk_lib):
+        sdk_lib = os.path.join(sdk_root, "lib")
+    if sdk_python not in sys.path:
+        sys.path.insert(0, sdk_python)
+    if os.path.isdir(sdk_lib):
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(sdk_lib)
+        else:
+            os.environ["PATH"] = sdk_lib + os.pathsep + os.environ.get("PATH", "")
+
+
 def measure(samples: list[float], sample_rate: float) -> dict[str, float]:
     if not samples:
         raise ValueError("No samples acquired")
@@ -56,6 +80,7 @@ class SimulatedADP2230:
 
 class WaveFormsADP2230:
     def __init__(self) -> None:
+        configure_waveforms_sdk()
         from WF_SDK import device, scope, wavegen
         self.device, self.scope, self.wavegen = device, scope, wavegen
         self.data = device.open("Analog Discovery Pro 3X50")

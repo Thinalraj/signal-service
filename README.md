@@ -19,5 +19,14 @@ connect the generator output to Scope channel 1, connect grounds, and run:
 python3 app.py
 ```
 
+On Windows, the application automatically searches for the SDK at
+`C:\Program Files\Digilent\WaveFormsSDK`. If it is installed elsewhere, set
+the root explicitly before running:
+
+```powershell
+$env:WAVEFORMS_SDK_ROOT="C:\ProgramsFiles\Digilent\WaveFormsSDK"
+python app.py
+```
+
 The WaveForms SDK sample is used as the hardware adapter seed. The requested
 1 Vpp output is configured as 0.5 V peak amplitude.
