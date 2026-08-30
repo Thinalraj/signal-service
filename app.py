@@ -139,7 +139,9 @@ class WaveFormsADP2230:
         self.dwf.FDwfDeviceCloseAll()
 
     def stop_sine(self) -> None:
-        self.dwf.FDwfAnalogOutReset(self.hdwf, self.c_int(0))
+        # Reset output and close the complete SDK session. The next start
+        # creates a fresh device handle instead of reusing stale state.
+        self.close()
 
 
 class App:
@@ -166,6 +168,7 @@ class App:
         self.instrument = None
         self.instrument_lock = threading.Lock()
         self.sine_running = False
+        self.root.protocol("WM_DELETE_WINDOW", self.close_application)
 
     def get_instrument(self):
         if self.instrument is None:
@@ -190,11 +193,23 @@ class App:
                 with self.instrument_lock:
                     if self.instrument:
                         self.instrument.stop_sine()
+                        self.instrument = None
                 self.sine_running = False
                 self.root.after(0, self.status.config, {"text": "Sine wave stopped"})
                 self.root.after(0, lambda: self.stop.config(state="disabled"))
             except Exception as exc:
                 self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
+        threading.Thread(target=worker, daemon=True).start()
+
+    def close_application(self) -> None:
+        """Stop output and release the ADP2230 before exiting the GUI."""
+        def worker() -> None:
+            with self.instrument_lock:
+                if self.instrument:
+                    self.instrument.close()
+                    self.instrument = None
+                self.sine_running = False
+            self.root.after(0, self.root.destroy)
         threading.Thread(target=worker, daemon=True).start()
 
     def start_measurement(self) -> None:
