@@ -81,25 +81,53 @@ class SimulatedADP2230:
 class WaveFormsADP2230:
     def __init__(self) -> None:
         configure_waveforms_sdk()
-        from WF_SDK import device, scope, wavegen
-        self.device, self.scope, self.wavegen = device, scope, wavegen
-        self.data = device.open("Analog Discovery Pro 3X50")
-        scope.open(self.data)
-        scope.trigger(self.data, enable=True, source=scope.trigger_source.analog, channel=1, level=0)
+        from ctypes import byref, c_double, c_int, cdll, create_string_buffer
+        from dwfconstants import DwfStateDone, hdwfNone
+        self.c_double, self.c_int, self.byref = c_double, c_int, byref
+        self.DwfStateDone, self.hdwfNone = DwfStateDone, hdwfNone
+        self.dwf = cdll.dwf
+        version = create_string_buffer(16)
+        self.dwf.FDwfGetVersion(version)
+        devices = c_int()
+        self.dwf.FDwfEnum(c_int(0), byref(devices))
+        if devices.value == 0:
+            raise RuntimeError("No WaveForms device detected")
+        self.hdwf = c_int()
+        self.dwf.FDwfDeviceOpen(c_int(0), byref(self.hdwf))
+        if self.hdwf.value == hdwfNone.value:
+            raise RuntimeError("Could not open the WaveForms device")
+        self.dwf.FDwfDeviceAutoConfigureSet(self.hdwf, c_int(0))
+        # Match the verified AnalogOutIn.py acquisition setup.
+        self.dwf.FDwfAnalogInFrequencySet(self.hdwf, c_double(1_000_000))
+        self.dwf.FDwfAnalogInChannelRangeSet(self.hdwf, c_int(-1), c_double(4))
+        self.dwf.FDwfAnalogInBufferSizeSet(self.hdwf, c_int(1000))
+        self.dwf.FDwfAnalogInConfigure(self.hdwf, c_int(1), c_int(0))
+        time.sleep(2)  # allow input offset to stabilize after opening
 
     def configure(self, frequency_hz: float, amplitude_v: float) -> None:
-        self.wavegen.generate(self.data, channel=1, function=self.wavegen.function.sine,
-                              offset=0, frequency=frequency_hz, amplitude=amplitude_v)
+        self.dwf.FDwfAnalogOutEnableSet(self.hdwf, self.c_int(0), self.c_int(1))
+        self.dwf.FDwfAnalogOutFunctionSet(self.hdwf, self.c_int(0), self.c_int(1))
+        self.dwf.FDwfAnalogOutFrequencySet(self.hdwf, self.c_int(0), self.c_double(frequency_hz))
+        self.dwf.FDwfAnalogOutAmplitudeSet(self.hdwf, self.c_int(0), self.c_double(amplitude_v))
+        self.dwf.FDwfAnalogOutConfigure(self.hdwf, self.c_int(0), self.c_int(1))
 
     def acquire(self, duration_s: float = 0.1, sample_rate: float = 1_000_000) -> tuple[list[float], float]:
-        # scope.record uses the SDK's configured acquisition settings.
-        samples = self.scope.record(self.data, channel=1)
-        return list(samples), self.scope.data.sampling_frequency
+        from ctypes import c_double
+        count = 1000
+        self.dwf.FDwfAnalogInConfigure(self.hdwf, self.c_int(1), self.c_int(1))
+        state = self.c_int()
+        while True:
+            self.dwf.FDwfAnalogInStatus(self.hdwf, self.c_int(1), self.byref(state))
+            if state.value == self.DwfStateDone.value:
+                break
+            time.sleep(0.01)
+        buffer = (c_double * count)()
+        self.dwf.FDwfAnalogInStatusData(self.hdwf, self.c_int(0), buffer, count)
+        return list(buffer), sample_rate
 
     def close(self) -> None:
-        self.scope.close(self.data)
-        self.wavegen.close(self.data)
-        self.device.close(self.data)
+        self.dwf.FDwfAnalogOutReset(self.hdwf, self.c_int(0))
+        self.dwf.FDwfDeviceCloseAll()
 
 
 class App:
