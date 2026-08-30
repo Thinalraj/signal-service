@@ -45,15 +45,19 @@ def measure(samples: list[float], sample_rate: float) -> dict[str, float]:
     ac = [v - dc for v in samples]
     rms = math.sqrt(sum(v * v for v in ac) / len(ac))
     p2p = max(samples) - min(samples)
-    # Zero-crossing interpolation is sufficient for the first service version.
-    crossings = []
-    for a, b in zip(ac, ac[1:]):
-        if a <= 0 < b:
-            crossings.append(a / (a - b))
-    frequency = 0.0
-    if len(crossings) >= 2:
-        periods = [((i + crossings[i + 1]) - (i + crossings[i])) for i in range(len(crossings) - 1)]
-        frequency = sample_rate / (sum(periods) / len(periods))
+    # Match AnalogIn_Frequency.py: estimate frequency from the FFT, then use
+    # parabolic interpolation around the strongest bin.
+    import numpy as np
+    spectrum = np.abs(np.fft.rfft(np.asarray(ac, dtype=float)))
+    spectrum[0] = 0.0
+    peak_bin = int(np.argmax(spectrum))
+    frequency = peak_bin * sample_rate / len(ac)
+    if 0 < peak_bin < len(spectrum) - 1:
+        left, center, right = spectrum[peak_bin - 1:peak_bin + 2]
+        denominator = left - 2 * center + right
+        if denominator:
+            correction = 0.5 * (left - right) / denominator
+            frequency = (peak_bin + correction) * sample_rate / len(ac)
     return {
         "ac_rms_v": rms,
         "peak_amplitude_v": max(abs(v) for v in ac),
@@ -132,7 +136,9 @@ class WaveFormsADP2230:
             time.sleep(0.01)
         buffer = (c_double * count)()
         self.dwf.FDwfAnalogInStatusData(self.hdwf, self.c_int(0), buffer, count)
-        return list(buffer), sample_rate
+        actual_rate = self.c_double()
+        self.dwf.FDwfAnalogInFrequencyGet(self.hdwf, self.byref(actual_rate))
+        return list(buffer), actual_rate.value
 
     def close(self) -> None:
         self.dwf.FDwfAnalogOutReset(self.hdwf, self.c_int(0))
