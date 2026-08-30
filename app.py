@@ -145,12 +145,18 @@ class WaveFormsADP2230:
 
 
 class App:
-    # First validation branch: one 10 kHz measurement at 10x sample rate.
-    stages = [(10_000, 0.01)]
+    frequencies = (8_000, 10_000, 15_000, 20_000)
 
     def __init__(self, root: tk.Tk, simulate: bool) -> None:
         self.root, self.simulate = root, simulate
         root.title("ADP2230 Signal Measurement")
+        self.selected_frequency = 10_000
+        frequency_controls = ttk.LabelFrame(root, text="Select frequency")
+        frequency_controls.pack(padx=16, pady=(12, 0))
+        for column, frequency in enumerate(self.frequencies):
+            ttk.Button(frequency_controls, text=f"{frequency // 1000} kHz",
+                       command=lambda f=frequency: self.select_frequency(f)).grid(
+                           row=0, column=column, padx=4, pady=4)
         controls = ttk.Frame(root)
         controls.pack(padx=16, pady=12)
         self.start = ttk.Button(controls, text="Start sine wave", command=self.start_sine)
@@ -170,6 +176,13 @@ class App:
         self.sine_running = False
         self.root.protocol("WM_DELETE_WINDOW", self.close_application)
 
+    def select_frequency(self, frequency: int) -> None:
+        if self.sine_running:
+            self.status.config(text="Stop the sine wave before selecting a new frequency")
+            return
+        self.selected_frequency = frequency
+        self.status.config(text=f"Selected {frequency / 1000:g} kHz")
+
     def get_instrument(self):
         if self.instrument is None:
             self.instrument = SimulatedADP2230() if self.simulate else WaveFormsADP2230()
@@ -179,9 +192,9 @@ class App:
         def worker() -> None:
             try:
                 with self.instrument_lock:
-                    self.get_instrument().start_sine(10_000, 0.5)
+                    self.get_instrument().start_sine(self.selected_frequency, 0.5)
                 self.sine_running = True
-                self.root.after(0, self.status.config, {"text": "10 kHz sine running (1 Vpp)"})
+                self.root.after(0, self.status.config, {"text": f"{self.selected_frequency / 1000:g} kHz sine running (1 Vpp)"})
                 self.root.after(0, lambda: self.stop.config(state="normal"))
             except Exception as exc:
                 self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
@@ -221,12 +234,12 @@ class App:
         try:
             if not self.sine_running:
                 with self.instrument_lock:
-                    instrument.start_sine(10_000, 0.5)
+                    instrument.start_sine(self.selected_frequency, 0.5)
                 self.sine_running = True
             with self.instrument_lock:
-                samples, rate = instrument.acquire(0.01, 100_000)
+                samples, rate = instrument.acquire(0.01, self.selected_frequency * 10)
             result = measure(samples, rate)
-            self.root.after(0, self.add_result, 10_000, result)
+            self.root.after(0, self.add_result, self.selected_frequency, result)
             self.root.after(0, self.status.config, {"text": "Complete"})
         except Exception as exc:
             self.root.after(0, self.status.config, {"text": f"Error: {exc}"})

@@ -1,12 +1,11 @@
 # ADP2230 Signal Service
 
-Initial single-frequency GUI proof of concept for a Digilent Analog Discovery
-Pro ADP2230. It drives Wavegen channel 1 with a 1 Vpp, 10 kHz sine wave and
-measures Scope channel 1 once at 100 kS/s (10x the generator frequency).
+Multi-frequency GUI proof of concept for a Digilent Analog Discovery Pro
+ADP2230. Select 8, 10, 15, or 20 kHz, start a 1 Vpp sine wave, and acquire a
+single Scope channel 1 measurement at 10x the selected generator frequency.
 
-The next branch can add the 15 kHz and 20 kHz stages after this reading is
-validated. Set both probes physically to 1x; probe attenuation is not changed
-by this program.
+Stop the sine wave before selecting another frequency. Set both probes
+physically to 1x; probe attenuation is not changed by this program.
 
 ## Run simulation
 
