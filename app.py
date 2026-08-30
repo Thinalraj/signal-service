@@ -74,6 +74,12 @@ class SimulatedADP2230:
                    for i in range(count)]
         return samples, actual_rate
 
+    def start_sine(self, frequency_hz: float, amplitude_v: float) -> None:
+        self.configure(frequency_hz, amplitude_v)
+
+    def stop_sine(self) -> None:
+        pass
+
     def close(self) -> None:
         pass
 
@@ -111,6 +117,9 @@ class WaveFormsADP2230:
         self.dwf.FDwfAnalogOutAmplitudeSet(self.hdwf, self.c_int(0), self.c_double(amplitude_v))
         self.dwf.FDwfAnalogOutConfigure(self.hdwf, self.c_int(0), self.c_int(1))
 
+    def start_sine(self, frequency_hz: float, amplitude_v: float) -> None:
+        self.configure(frequency_hz, amplitude_v)
+
     def acquire(self, duration_s: float = 0.01, sample_rate: float = 100_000) -> tuple[list[float], float]:
         from ctypes import c_double
         count = 1000
@@ -129,6 +138,9 @@ class WaveFormsADP2230:
         self.dwf.FDwfAnalogOutReset(self.hdwf, self.c_int(0))
         self.dwf.FDwfDeviceCloseAll()
 
+    def stop_sine(self) -> None:
+        self.dwf.FDwfAnalogOutReset(self.hdwf, self.c_int(0))
+
 
 class App:
     # First validation branch: one 10 kHz measurement at 10x sample rate.
@@ -137,33 +149,73 @@ class App:
     def __init__(self, root: tk.Tk, simulate: bool) -> None:
         self.root, self.simulate = root, simulate
         root.title("ADP2230 Signal Measurement")
-        self.start = ttk.Button(root, text="Start measurement", command=self.start_measurement)
-        self.start.pack(padx=16, pady=12)
+        controls = ttk.Frame(root)
+        controls.pack(padx=16, pady=12)
+        self.start = ttk.Button(controls, text="Start sine wave", command=self.start_sine)
+        self.start.grid(row=0, column=0, padx=4)
+        self.stop = ttk.Button(controls, text="Stop sine wave", command=self.stop_sine, state="disabled")
+        self.stop.grid(row=0, column=1, padx=4)
+        self.acquire_button = ttk.Button(controls, text="Acquire measurement", command=self.start_measurement)
+        self.acquire_button.grid(row=0, column=2, padx=4)
         self.status = ttk.Label(root, text="Ready")
         self.status.pack(padx=16)
         self.table = ttk.Treeview(root, columns=("set", "rms", "peak", "p2p", "freq"), show="headings")
         for col, title in zip(self.table["columns"], ("Set Hz", "AC RMS V", "Peak V", "Vpp", "Measured Hz")):
             self.table.heading(col, text=title)
         self.table.pack(padx=16, pady=12)
+        self.instrument = None
+        self.instrument_lock = threading.Lock()
+        self.sine_running = False
+
+    def get_instrument(self):
+        if self.instrument is None:
+            self.instrument = SimulatedADP2230() if self.simulate else WaveFormsADP2230()
+        return self.instrument
+
+    def start_sine(self) -> None:
+        def worker() -> None:
+            try:
+                with self.instrument_lock:
+                    self.get_instrument().start_sine(10_000, 0.5)
+                self.sine_running = True
+                self.root.after(0, self.status.config, {"text": "10 kHz sine running (1 Vpp)"})
+                self.root.after(0, lambda: self.stop.config(state="normal"))
+            except Exception as exc:
+                self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
+        threading.Thread(target=worker, daemon=True).start()
+
+    def stop_sine(self) -> None:
+        def worker() -> None:
+            try:
+                with self.instrument_lock:
+                    if self.instrument:
+                        self.instrument.stop_sine()
+                self.sine_running = False
+                self.root.after(0, self.status.config, {"text": "Sine wave stopped"})
+                self.root.after(0, lambda: self.stop.config(state="disabled"))
+            except Exception as exc:
+                self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
+        threading.Thread(target=worker, daemon=True).start()
 
     def start_measurement(self) -> None:
         self.start.config(state="disabled")
         threading.Thread(target=self.run, daemon=True).start()
 
     def run(self) -> None:
-        instrument = SimulatedADP2230() if self.simulate else WaveFormsADP2230()
+        instrument = self.get_instrument()
         try:
-            for frequency, seconds in self.stages:
-                self.root.after(0, self.status.config, {"text": f"Measuring {frequency / 1000:g} kHz"})
-                instrument.configure(frequency, 0.5)  # 1 V peak-to-peak = 0.5 V peak
-                samples, rate = instrument.acquire(seconds, frequency * 10)
-                result = measure(samples, rate)
-                self.root.after(0, self.add_result, frequency, result)
+            if not self.sine_running:
+                with self.instrument_lock:
+                    instrument.start_sine(10_000, 0.5)
+                self.sine_running = True
+            with self.instrument_lock:
+                samples, rate = instrument.acquire(0.01, 100_000)
+            result = measure(samples, rate)
+            self.root.after(0, self.add_result, 10_000, result)
             self.root.after(0, self.status.config, {"text": "Complete"})
         except Exception as exc:
             self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
         finally:
-            instrument.close()
             self.root.after(0, lambda: self.start.config(state="normal"))
 
     def add_result(self, set_frequency: float, result: dict[str, float]) -> None:
