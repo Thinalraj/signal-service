@@ -157,12 +157,19 @@ class App:
         self.root, self.simulate = root, simulate
         root.title("ADP2230 Signal Measurement")
         self.selected_frequency = 10_000
+        self.amplitude = tk.DoubleVar(value=1.0)
         frequency_controls = ttk.LabelFrame(root, text="Select frequency")
         frequency_controls.pack(padx=16, pady=(12, 0))
         for column, frequency in enumerate(self.frequencies):
             ttk.Button(frequency_controls, text=f"{frequency // 1000} kHz",
                        command=lambda f=frequency: self.select_frequency(f)).grid(
                            row=0, column=column, padx=4, pady=4)
+        amplitude_controls = ttk.Frame(root)
+        amplitude_controls.pack(padx=16, pady=(8, 0))
+        ttk.Label(amplitude_controls, text="Amplitude (V peak, max 5 V):").grid(row=0, column=0, padx=4)
+        self.amplitude_input = ttk.Spinbox(amplitude_controls, from_=0.0, to=5.0,
+                                           increment=0.1, width=8, textvariable=self.amplitude)
+        self.amplitude_input.grid(row=0, column=1, padx=4)
         controls = ttk.Frame(root)
         controls.pack(padx=16, pady=12)
         self.start = ttk.Button(controls, text="Start sine wave", command=self.start_sine)
@@ -189,6 +196,15 @@ class App:
         self.selected_frequency = frequency
         self.status.config(text=f"Selected {frequency / 1000:g} kHz")
 
+    def selected_amplitude(self) -> float:
+        try:
+            amplitude = float(self.amplitude.get())
+        except (tk.TclError, ValueError):
+            raise ValueError("Amplitude must be a number from 0 to 5 V")
+        if not 0.0 <= amplitude <= 5.0:
+            raise ValueError("Amplitude must be between 0 and 5 V")
+        return amplitude
+
     def get_instrument(self):
         if self.instrument is None:
             self.instrument = SimulatedADP2230() if self.simulate else WaveFormsADP2230()
@@ -197,10 +213,11 @@ class App:
     def start_sine(self) -> None:
         def worker() -> None:
             try:
+                amplitude = self.selected_amplitude()
                 with self.instrument_lock:
-                    self.get_instrument().start_sine(self.selected_frequency, 0.5)
+                    self.get_instrument().start_sine(self.selected_frequency, amplitude)
                 self.sine_running = True
-                self.root.after(0, self.status.config, {"text": f"{self.selected_frequency / 1000:g} kHz sine running (1 Vpp)"})
+                self.root.after(0, self.status.config, {"text": f"{self.selected_frequency / 1000:g} kHz sine running ({amplitude:g} V peak)"})
                 self.root.after(0, lambda: self.stop.config(state="normal"))
             except Exception as exc:
                 self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
@@ -239,8 +256,9 @@ class App:
         instrument = self.get_instrument()
         try:
             if not self.sine_running:
+                amplitude = self.selected_amplitude()
                 with self.instrument_lock:
-                    instrument.start_sine(self.selected_frequency, 0.5)
+                    instrument.start_sine(self.selected_frequency, amplitude)
                 self.sine_running = True
             with self.instrument_lock:
                 samples, rate = instrument.acquire(0.01, self.selected_frequency * 10)

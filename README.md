@@ -3,6 +3,7 @@
 Multi-frequency GUI proof of concept for a Digilent Analog Discovery Pro
 ADP2230. Select 8, 10, 15, or 20 kHz, start a 1 Vpp sine wave, and acquire a
 single Scope channel 1 measurement at 10x the selected generator frequency.
+The amplitude control defaults to 1 V peak and is limited to 5 V peak.
 
 Stop the sine wave before selecting another frequency. Set both probes
 physically to 1x; probe attenuation is not changed by this program.
@@ -32,4 +33,5 @@ python app.py
 ```
 
 The WaveForms SDK sample is used as the hardware adapter seed. The requested
-1 Vpp output is configured as 0.5 V peak amplitude.
+The WaveForms amplitude parameter is peak amplitude, so the GUI labels the
+control as V peak. A 1 Vpp signal should therefore be entered as 0.5 V peak.
