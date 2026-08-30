@@ -98,7 +98,7 @@ class WaveFormsADP2230:
             raise RuntimeError("Could not open the WaveForms device")
         self.dwf.FDwfDeviceAutoConfigureSet(self.hdwf, c_int(0))
         # Match the verified AnalogOutIn.py acquisition setup.
-        self.dwf.FDwfAnalogInFrequencySet(self.hdwf, c_double(1_000_000))
+        self.dwf.FDwfAnalogInFrequencySet(self.hdwf, c_double(100_000))
         self.dwf.FDwfAnalogInChannelRangeSet(self.hdwf, c_int(-1), c_double(4))
         self.dwf.FDwfAnalogInBufferSizeSet(self.hdwf, c_int(1000))
         self.dwf.FDwfAnalogInConfigure(self.hdwf, c_int(1), c_int(0))
@@ -111,7 +111,7 @@ class WaveFormsADP2230:
         self.dwf.FDwfAnalogOutAmplitudeSet(self.hdwf, self.c_int(0), self.c_double(amplitude_v))
         self.dwf.FDwfAnalogOutConfigure(self.hdwf, self.c_int(0), self.c_int(1))
 
-    def acquire(self, duration_s: float = 0.1, sample_rate: float = 1_000_000) -> tuple[list[float], float]:
+    def acquire(self, duration_s: float = 0.01, sample_rate: float = 100_000) -> tuple[list[float], float]:
         from ctypes import c_double
         count = 1000
         self.dwf.FDwfAnalogInConfigure(self.hdwf, self.c_int(1), self.c_int(1))
@@ -131,7 +131,8 @@ class WaveFormsADP2230:
 
 
 class App:
-    stages = [(10_000, 5), (15_000, 5), (20_000, 5)]
+    # First validation branch: one 10 kHz measurement at 10x sample rate.
+    stages = [(10_000, 0.01)]
 
     def __init__(self, root: tk.Tk, simulate: bool) -> None:
         self.root, self.simulate = root, simulate
@@ -155,12 +156,9 @@ class App:
             for frequency, seconds in self.stages:
                 self.root.after(0, self.status.config, {"text": f"Measuring {frequency / 1000:g} kHz"})
                 instrument.configure(frequency, 0.5)  # 1 V peak-to-peak = 0.5 V peak
-                end = time.monotonic() + seconds
-                while time.monotonic() < end:
-                    samples, rate = instrument.acquire()
-                    result = measure(samples, rate)
-                    self.root.after(0, self.add_result, frequency, result)
-                    time.sleep(0.25)
+                samples, rate = instrument.acquire(seconds, frequency * 10)
+                result = measure(samples, rate)
+                self.root.after(0, self.add_result, frequency, result)
             self.root.after(0, self.status.config, {"text": "Complete"})
         except Exception as exc:
             self.root.after(0, self.status.config, {"text": f"Error: {exc}"})
