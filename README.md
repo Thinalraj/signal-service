@@ -12,6 +12,20 @@ Use **Sample measurement** to acquire N readings at a selected interval. The
 statistics table reports mean, minimum, maximum, standard deviation, and mean
 ± standard deviation for each measured quantity.
 
+## REST service
+
+Install dependencies and start a simulation server:
+
+```powershell
+python -m pip install -r requirements.txt
+python .\rest_service.py --simulate
+```
+
+For hardware, omit `--simulate`. Endpoints are `GET /status`, `POST
+/sine/start`, `POST /sine/stop`, `POST /measurement`, and `POST
+/measurements/sample`. Interactive API documentation is available at
+`http://127.0.0.1:8000/docs`.
+
 ## Run simulation
 
 ```bash
