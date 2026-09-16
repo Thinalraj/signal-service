@@ -160,6 +160,15 @@ class App:
     def __init__(self, root: tk.Tk, simulate: bool) -> None:
         self.root, self.simulate = root, simulate
         root.title("ADP2230 Signal Measurement")
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True, padx=6, pady=6)
+        main_tab = ttk.Frame(self.notebook)
+        calibration_tab = ttk.Frame(self.notebook)
+        metal_tab = ttk.Frame(self.notebook)
+        self.notebook.add(main_tab, text="Measurement")
+        self.notebook.add(calibration_tab, text="Air calibration")
+        self.notebook.add(metal_tab, text="Metal delta")
+        root = main_tab
         self.selected_frequency = 10_000
         self.amplitude = tk.DoubleVar(value=1.0)
         self.calibration = self.load_calibration()
@@ -185,6 +194,7 @@ class App:
         self.acquire_button.grid(row=0, column=2, padx=4)
         self.sample_button = ttk.Button(controls, text="Sample measurement", command=self.start_sampling)
         self.sample_button.grid(row=0, column=3, padx=4)
+        ttk.Button(controls, text="Save air calibration", command=self.calibrate_air).grid(row=0, column=4, padx=4)
         sample_controls = ttk.Frame(root)
         sample_controls.pack(padx=16, pady=(8, 0))
         ttk.Label(sample_controls, text="N samples:").grid(row=0, column=0, padx=4)
@@ -208,25 +218,28 @@ class App:
         self.instrument_lock = threading.Lock()
         self.sine_running = False
         self.root.protocol("WM_DELETE_WINDOW", self.close_application)
-        self.build_calibration_tab(root)
+        self.build_calibration_tab(calibration_tab, metal_tab)
 
-    def build_calibration_tab(self, root: tk.Tk) -> None:
-        self.notebook = ttk.Notebook(root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
-        tab = ttk.Frame(self.notebook)
-        self.notebook.add(tab, text="Air calibration / Metal test")
-        ttk.Label(tab, text="Calibrate air first, then test with metal at the same frequency.").pack(pady=8)
+    def build_calibration_tab(self, tab: ttk.Frame, metal_tab: ttk.Frame) -> None:
+        ttk.Label(tab, text="Calibrate air for the selected frequency.").pack(pady=8)
         buttons = ttk.Frame(tab)
         buttons.pack(pady=4)
         ttk.Button(buttons, text="Calibrate air", command=self.calibrate_air).grid(row=0, column=0, padx=5)
         ttk.Button(buttons, text="Save air calibration", command=self.save_air_calibration).grid(row=0, column=1, padx=5)
-        ttk.Button(buttons, text="Test metal", command=self.test_metal).grid(row=0, column=2, padx=5)
         self.calibration_status = ttk.Label(tab, text="No calibration loaded")
         self.calibration_status.pack(pady=5)
         self.calibration_table = ttk.Treeview(tab, columns=("frequency", "air", "metal", "delta"), show="headings")
         for col, title in zip(self.calibration_table["columns"], ("Frequency", "Air baseline", "Metal", "Delta")):
             self.calibration_table.heading(col, text=title)
         self.calibration_table.pack(fill="both", expand=True, padx=10, pady=8)
+        ttk.Label(metal_tab, text="Select a frequency in Measurement, then test the metal target.").pack(pady=8)
+        ttk.Button(metal_tab, text="Test metal", command=self.test_metal).pack(pady=6)
+        self.metal_status = ttk.Label(metal_tab, text="No metal test yet")
+        self.metal_status.pack(pady=5)
+        self.metal_table = ttk.Treeview(metal_tab, columns=("frequency", "air", "metal", "delta"), show="headings")
+        for col, title in zip(self.metal_table["columns"], ("Frequency", "Air baseline", "Metal", "Delta")):
+            self.metal_table.heading(col, text=title)
+        self.metal_table.pack(fill="both", expand=True, padx=10, pady=8)
         self.refresh_calibration_table()
 
     def load_calibration(self) -> dict:
@@ -263,6 +276,11 @@ class App:
                 f"RMS {value(air, 'ac_rms_v')} / Vpp {value(air, 'peak_to_peak_v')}",
                 f"RMS {value(metal, 'ac_rms_v')} / Vpp {value(metal, 'peak_to_peak_v')}",
                 f"RMS {value(row.get('delta', {}), 'ac_rms_v')} / Vpp {value(row.get('delta', {}), 'peak_to_peak_v')}"))
+            if hasattr(self, "metal_table"):
+                self.metal_table.insert("", "end", values=(f"{frequency / 1000:g} kHz",
+                    f"RMS {value(air, 'ac_rms_v')} / Vpp {value(air, 'peak_to_peak_v')}",
+                    f"RMS {value(metal, 'ac_rms_v')} / Vpp {value(metal, 'peak_to_peak_v')}",
+                    f"RMS {value(row.get('delta', {}), 'ac_rms_v')} / Vpp {value(row.get('delta', {}), 'peak_to_peak_v')}"))
 
     def calibration_measurement(self) -> dict:
         instrument = self.get_instrument()
@@ -279,8 +297,9 @@ class App:
                 result = self.calibration_measurement()
                 key = str(self.selected_frequency)
                 self.calibration.setdefault(key, {})["air"] = result
+                self.save_calibration()
                 self.root.after(0, self.refresh_calibration_table)
-                self.root.after(0, self.calibration_status.config, {"text": f"Air calibration captured for {self.selected_frequency / 1000:g} kHz; press Save air calibration"})
+                self.root.after(0, self.calibration_status.config, {"text": f"Air calibration saved for {self.selected_frequency / 1000:g} kHz"})
             except Exception as exc:
                 self.root.after(0, self.calibration_status.config, {"text": f"Calibration error: {exc}"})
         threading.Thread(target=worker, daemon=True).start()
@@ -299,6 +318,7 @@ class App:
                 self.save_calibration()
                 self.root.after(0, self.refresh_calibration_table)
                 self.root.after(0, self.calibration_status.config, {"text": f"Metal delta saved for {self.selected_frequency / 1000:g} kHz"})
+                self.root.after(0, self.metal_status.config, {"text": f"Metal delta saved for {self.selected_frequency / 1000:g} kHz"})
             except Exception as exc:
                 self.root.after(0, self.calibration_status.config, {"text": f"Metal test error: {exc}"})
         threading.Thread(target=worker, daemon=True).start()
