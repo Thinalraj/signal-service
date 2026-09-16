@@ -7,11 +7,15 @@ then run ``python3 app.py``.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import threading
 import time
 import tkinter as tk
 from tkinter import ttk
+from pathlib import Path
+
+CALIBRATION_FILE = Path(__file__).with_name("calibration_data.json")
 
 
 def configure_waveforms_sdk() -> None:
@@ -158,6 +162,7 @@ class App:
         root.title("ADP2230 Signal Measurement")
         self.selected_frequency = 10_000
         self.amplitude = tk.DoubleVar(value=1.0)
+        self.calibration = self.load_calibration()
         frequency_controls = ttk.LabelFrame(root, text="Select frequency")
         frequency_controls.pack(padx=16, pady=(12, 0))
         for column, frequency in enumerate(self.frequencies):
@@ -203,6 +208,90 @@ class App:
         self.instrument_lock = threading.Lock()
         self.sine_running = False
         self.root.protocol("WM_DELETE_WINDOW", self.close_application)
+        self.build_calibration_tab(root)
+
+    def build_calibration_tab(self, root: tk.Tk) -> None:
+        self.notebook = ttk.Notebook(root)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="Air calibration / Metal test")
+        ttk.Label(tab, text="Calibrate air first, then test with metal at the same frequency.").pack(pady=8)
+        buttons = ttk.Frame(tab)
+        buttons.pack(pady=4)
+        ttk.Button(buttons, text="Calibrate air", command=self.calibrate_air).grid(row=0, column=0, padx=5)
+        ttk.Button(buttons, text="Test metal", command=self.test_metal).grid(row=0, column=1, padx=5)
+        self.calibration_status = ttk.Label(tab, text="No calibration loaded")
+        self.calibration_status.pack(pady=5)
+        self.calibration_table = ttk.Treeview(tab, columns=("frequency", "air", "metal", "delta"), show="headings")
+        for col, title in zip(self.calibration_table["columns"], ("Frequency", "Air baseline", "Metal", "Delta")):
+            self.calibration_table.heading(col, text=title)
+        self.calibration_table.pack(fill="both", expand=True, padx=10, pady=8)
+        self.refresh_calibration_table()
+
+    def load_calibration(self) -> dict:
+        try:
+            return json.loads(CALIBRATION_FILE.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def save_calibration(self) -> None:
+        CALIBRATION_FILE.write_text(json.dumps(self.calibration, indent=2), encoding="utf-8")
+
+    def refresh_calibration_table(self) -> None:
+        if not hasattr(self, "calibration_table"):
+            return
+        for item in self.calibration_table.get_children():
+            self.calibration_table.delete(item)
+        for frequency in self.frequencies:
+            row = self.calibration.get(str(frequency), {})
+            air = row.get("air", {})
+            metal = row.get("metal", {})
+            def value(data, key):
+                return "" if key not in data else f"{data[key]:.6g}"
+            self.calibration_table.insert("", "end", values=(f"{frequency / 1000:g} kHz",
+                f"RMS {value(air, 'ac_rms_v')} / Vpp {value(air, 'peak_to_peak_v')}",
+                f"RMS {value(metal, 'ac_rms_v')} / Vpp {value(metal, 'peak_to_peak_v')}",
+                f"RMS {value(row.get('delta', {}), 'ac_rms_v')} / Vpp {value(row.get('delta', {}), 'peak_to_peak_v')}"))
+
+    def calibration_measurement(self) -> dict:
+        instrument = self.get_instrument()
+        if not self.sine_running:
+            instrument.start_sine(self.selected_frequency, self.selected_amplitude())
+            self.sine_running = True
+        with self.instrument_lock:
+            samples, rate = instrument.acquire(0.01, self.selected_frequency * 10)
+        return measure(samples, rate)
+
+    def calibrate_air(self) -> None:
+        def worker():
+            try:
+                result = self.calibration_measurement()
+                key = str(self.selected_frequency)
+                self.calibration.setdefault(key, {})["air"] = result
+                self.save_calibration()
+                self.root.after(0, self.refresh_calibration_table)
+                self.root.after(0, self.calibration_status.config, {"text": f"Air calibration saved for {self.selected_frequency / 1000:g} kHz"})
+            except Exception as exc:
+                self.root.after(0, self.calibration_status.config, {"text": f"Calibration error: {exc}"})
+        threading.Thread(target=worker, daemon=True).start()
+
+    def test_metal(self) -> None:
+        def worker():
+            try:
+                result = self.calibration_measurement()
+                key = str(self.selected_frequency)
+                air = self.calibration.get(key, {}).get("air")
+                if not air:
+                    raise ValueError("Calibrate air at this frequency first")
+                delta = {name: result[name] - air[name] for name in ("ac_rms_v", "peak_amplitude_v", "peak_to_peak_v", "frequency_hz", "dc_v")}
+                self.calibration.setdefault(key, {})["metal"] = result
+                self.calibration[key]["delta"] = delta
+                self.save_calibration()
+                self.root.after(0, self.refresh_calibration_table)
+                self.root.after(0, self.calibration_status.config, {"text": f"Metal delta saved for {self.selected_frequency / 1000:g} kHz"})
+            except Exception as exc:
+                self.root.after(0, self.calibration_status.config, {"text": f"Metal test error: {exc}"})
+        threading.Thread(target=worker, daemon=True).start()
 
     def select_frequency(self, frequency: int) -> None:
         if self.sine_running:

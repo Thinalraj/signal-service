@@ -53,3 +53,7 @@ python app.py
 The WaveForms SDK sample is used as the hardware adapter seed. The requested
 The WaveForms amplitude parameter is peak amplitude, so the GUI labels the
 control as V peak. A 1 Vpp signal should therefore be entered as 0.5 V peak.
+
+Air calibration and metal testing are available in the **Air calibration /
+Metal test** tab. Results are stored in `calibration_data.json`, keyed by
+frequency. Metal delta is calculated as `metal - air` for each measurement.
