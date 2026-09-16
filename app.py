@@ -219,7 +219,8 @@ class App:
         buttons = ttk.Frame(tab)
         buttons.pack(pady=4)
         ttk.Button(buttons, text="Calibrate air", command=self.calibrate_air).grid(row=0, column=0, padx=5)
-        ttk.Button(buttons, text="Test metal", command=self.test_metal).grid(row=0, column=1, padx=5)
+        ttk.Button(buttons, text="Save air calibration", command=self.save_air_calibration).grid(row=0, column=1, padx=5)
+        ttk.Button(buttons, text="Test metal", command=self.test_metal).grid(row=0, column=2, padx=5)
         self.calibration_status = ttk.Label(tab, text="No calibration loaded")
         self.calibration_status.pack(pady=5)
         self.calibration_table = ttk.Treeview(tab, columns=("frequency", "air", "metal", "delta"), show="headings")
@@ -236,6 +237,16 @@ class App:
 
     def save_calibration(self) -> None:
         CALIBRATION_FILE.write_text(json.dumps(self.calibration, indent=2), encoding="utf-8")
+
+    def save_air_calibration(self) -> None:
+        try:
+            air_count = sum(1 for row in self.calibration.values() if row.get("air"))
+            if air_count == 0:
+                raise ValueError("No air calibration values to save")
+            self.save_calibration()
+            self.calibration_status.config(text=f"Saved {air_count} air calibration value(s) to {CALIBRATION_FILE.name}")
+        except Exception as exc:
+            self.calibration_status.config(text=f"Save error: {exc}")
 
     def refresh_calibration_table(self) -> None:
         if not hasattr(self, "calibration_table"):
@@ -268,9 +279,8 @@ class App:
                 result = self.calibration_measurement()
                 key = str(self.selected_frequency)
                 self.calibration.setdefault(key, {})["air"] = result
-                self.save_calibration()
                 self.root.after(0, self.refresh_calibration_table)
-                self.root.after(0, self.calibration_status.config, {"text": f"Air calibration saved for {self.selected_frequency / 1000:g} kHz"})
+                self.root.after(0, self.calibration_status.config, {"text": f"Air calibration captured for {self.selected_frequency / 1000:g} kHz; press Save air calibration"})
             except Exception as exc:
                 self.root.after(0, self.calibration_status.config, {"text": f"Calibration error: {exc}"})
         threading.Thread(target=worker, daemon=True).start()
