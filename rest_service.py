@@ -5,7 +5,7 @@ import threading
 import time
 from statistics import mean, pstdev
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app import SimulatedADP2230, WaveFormsADP2230, measure
@@ -64,6 +64,35 @@ class Controller:
         result["sample_count"] = len(samples)
         return result
 
+    def read_frequency(self, frequency_hz: int, amplitude_v: float = 1.0):
+        self.start(StartRequest(frequency_hz=frequency_hz, amplitude_v=amplitude_v))
+        try:
+            return self.acquire()
+        finally:
+            self.stop()
+
+    def average_frequency(self, frequency_hz: int, sample_size: int,
+                          interval_s: float, amplitude_v: float = 1.0):
+        self.start(StartRequest(frequency_hz=frequency_hz, amplitude_v=amplitude_v))
+        try:
+            readings = []
+            for index in range(sample_size):
+                readings.append(self.acquire())
+                if index + 1 < sample_size:
+                    time.sleep(interval_s)
+            output = {}
+            for key in ("ac_rms_v", "peak_amplitude_v", "peak_to_peak_v", "frequency_hz"):
+                values = [reading[key] for reading in readings]
+                avg = mean(values)
+                std = pstdev(values) if len(values) > 1 else 0.0
+                output[key] = {"mean": avg, "min": min(values), "max": max(values),
+                               "std_dev": std, "plus_minus": std}
+            return {"frequency_hz": frequency_hz, "amplitude_v": amplitude_v,
+                    "sample_size": sample_size, "interval_s": interval_s,
+                    "statistics": output}
+        finally:
+            self.stop()
+
     def sample(self, request: SampleRequest):
         readings = []
         for index in range(request.count):
@@ -111,6 +140,24 @@ def create_app(simulate: bool = False) -> FastAPI:
     def measurement():
         try:
             return controller.acquire()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @api.get("/measurement/average")
+    def single_frequency_average(frequency_hz: int = Query(...),
+                                 sample_size: int = Query(..., ge=1, le=1000),
+                                 interval_s: float = Query(..., ge=0.0, le=3600.0),
+                                 amplitude_v: float = Query(1.0, ge=0.0, le=5.0)):
+        try:
+            return controller.average_frequency(frequency_hz, sample_size, interval_s, amplitude_v)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @api.get("/measurement/{frequency_hz}")
+    def single_frequency(frequency_hz: int,
+                         amplitude_v: float = Query(1.0, ge=0.0, le=5.0)):
+        try:
+            return controller.read_frequency(frequency_hz, amplitude_v)
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

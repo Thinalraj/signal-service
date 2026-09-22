@@ -26,6 +26,17 @@ For hardware, omit `--simulate`. Endpoints are `GET /status`, `POST
 /measurements/sample`. Interactive API documentation is available at
 `http://127.0.0.1:8000/docs`.
 
+Direct frequency readings are also available:
+
+```text
+GET /measurement/10000?amplitude_v=1.0
+GET /measurement/average?frequency_hz=10000&sample_size=10&interval_s=0.5&amplitude_v=1.0
+```
+
+The first endpoint starts the selected frequency, takes one reading, and
+stops the generator. The average endpoint takes the requested readings,
+calculates statistics, and then stops the generator.
+
 ## Run simulation
 
 ```bash
