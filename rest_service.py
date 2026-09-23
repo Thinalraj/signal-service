@@ -67,6 +67,7 @@ class Controller:
     def read_frequency(self, frequency_hz: int, amplitude_v: float = 1.0):
         self.start(StartRequest(frequency_hz=frequency_hz, amplitude_v=amplitude_v))
         try:
+            time.sleep(5.0)  # generator/input stabilization time
             return self.acquire()
         finally:
             self.stop()
@@ -75,6 +76,7 @@ class Controller:
                           interval_s: float, amplitude_v: float = 1.0):
         self.start(StartRequest(frequency_hz=frequency_hz, amplitude_v=amplitude_v))
         try:
+            time.sleep(5.0)  # stabilize before the first scope acquisition
             readings = []
             for index in range(sample_size):
                 readings.append(self.acquire())

@@ -37,6 +37,24 @@ The first endpoint starts the selected frequency, takes one reading, and
 stops the generator. The average endpoint takes the requested readings,
 calculates statistics, and then stops the generator.
 
+## Flask test server
+
+Use the simulated Flask server to test clients without an ADP2230:
+
+```powershell
+python -m pip install -r requirements.txt
+python .\test_flask_server.py
+```
+
+Test one reading:
+
+```text
+http://127.0.0.1:5000/measurement/10000?amplitude_v=1.0
+```
+
+The production FastAPI and test Flask endpoints use the same sequence:
+configure → start → stabilize for 5 seconds → acquire → close → return.
+
 ## Run simulation
 
 ```bash
