@@ -11,6 +11,19 @@ app = Flask(__name__)
 controller = Controller(simulate=True)
 
 
+@app.get("/")
+def index():
+    return jsonify({
+        "service": "ADP2230 Flask test server",
+        "status": "running",
+        "examples": [
+            "/status",
+            "/measurement/10000?amplitude_v=1.0",
+            "/measurement/average?frequency_hz=10000&sample_size=3&interval_s=0.5",
+        ],
+    })
+
+
 @app.get("/status")
 def status():
     return jsonify(controller.status())
